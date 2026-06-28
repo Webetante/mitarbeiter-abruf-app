@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, TextInput, ScrollView, Alert } from 'react-native';
 import { supabase } from '../../lib/supabase';
 
-type Screen = 'home' | 'login' | 'register';
+type Screen = 'home' | 'login' | 'register' | 'dashboard';
 
 type Branch = {
   id: string;
@@ -10,15 +10,39 @@ type Branch = {
   city: string | null;
 };
 
+type UserProfile = {
+  id: string;
+  full_name: string | null;
+  phone: string | null;
+  role: 'admin' | 'counter' | 'employee';
+  branch_id: string | null;
+  active: boolean;
+};
+
 export default function HomeScreen() {
   const [screen, setScreen] = useState<Screen>('home');
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  function handleLoggedIn(nextProfile: UserProfile) {
+    setProfile(nextProfile);
+    setScreen('dashboard');
+  }
+
+  function handleLogout() {
+    setProfile(null);
+    setScreen('home');
+  }
 
   if (screen === 'login') {
-    return <LoginScreen onBack={() => setScreen('home')} />;
+    return <LoginScreen onBack={() => setScreen('home')} onLoggedIn={handleLoggedIn} />;
   }
 
   if (screen === 'register') {
-    return <RegisterScreen onBack={() => setScreen('home')} />;
+    return <RegisterScreen onBack={() => setScreen('home')} onRegistered={handleLoggedIn} />;
+  }
+
+  if (screen === 'dashboard' && profile) {
+    return <DashboardScreen profile={profile} onLogout={handleLogout} />;
   }
 
   return (
@@ -38,25 +62,64 @@ export default function HomeScreen() {
 
       <View style={styles.infoBox}>
         <Text style={styles.infoTitle}>Status</Text>
-        <Text style={styles.infoText}>Supabase ist verbunden. Filialen werden live geladen.</Text>
+        <Text style={styles.infoText}>Login, Registrierung und Rollen sind vorbereitet.</Text>
       </View>
     </View>
   );
 }
 
-function LoginScreen({ onBack }: { onBack: () => void }) {
+async function loadProfile(userId: string): Promise<UserProfile | null> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, full_name, phone, role, branch_id, active')
+    .eq('id', userId)
+    .single();
+
+  if (error) {
+    Alert.alert('Profil konnte nicht geladen werden', error.message);
+    return null;
+  }
+
+  return data as UserProfile;
+}
+
+function LoginScreen({
+  onBack,
+  onLoggedIn,
+}: {
+  onBack: () => void;
+  onLoggedIn: (profile: UserProfile) => void;
+}) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
   async function handleLogin() {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
       Alert.alert('Login fehlgeschlagen', error.message);
       return;
     }
 
-    Alert.alert('Eingeloggt', 'Login war erfolgreich.');
+    const userId = data.user?.id;
+
+    if (!userId) {
+      Alert.alert('Login fehlgeschlagen', 'Kein Benutzer gefunden.');
+      return;
+    }
+
+    const profile = await loadProfile(userId);
+
+    if (!profile) {
+      return;
+    }
+
+    if (!profile.active) {
+      Alert.alert('Konto deaktiviert', 'Dieses Konto ist nicht aktiv.');
+      return;
+    }
+
+    onLoggedIn(profile);
   }
 
   return (
@@ -78,7 +141,13 @@ function LoginScreen({ onBack }: { onBack: () => void }) {
   );
 }
 
-function RegisterScreen({ onBack }: { onBack: () => void }) {
+function RegisterScreen({
+  onBack,
+  onRegistered,
+}: {
+  onBack: () => void;
+  onRegistered: (profile: UserProfile) => void;
+}) {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState<string>('');
   const [fullName, setFullName] = useState('');
@@ -125,18 +194,20 @@ function RegisterScreen({ onBack }: { onBack: () => void }) {
     const userId = data.user?.id;
 
     if (!userId) {
-      Alert.alert('Fast fertig', 'Bitte bestaetige deine E-Mail-Adresse.');
+      Alert.alert('Registrierung fehlgeschlagen', 'Kein Benutzer gefunden.');
       return;
     }
 
-    const { error: profileError } = await supabase.from('profiles').insert({
+    const newProfile = {
       id: userId,
       full_name: fullName,
       phone,
-      role: 'employee',
+      role: 'employee' as const,
       branch_id: selectedBranchId,
       active: true,
-    });
+    };
+
+    const { error: profileError } = await supabase.from('profiles').insert(newProfile);
 
     if (profileError) {
       Alert.alert('Profil konnte nicht erstellt werden', profileError.message);
@@ -144,7 +215,7 @@ function RegisterScreen({ onBack }: { onBack: () => void }) {
     }
 
     Alert.alert('Registriert', 'Dein Mitarbeiter-Konto wurde erstellt.');
-    onBack();
+    onRegistered(newProfile);
   }
 
   return (
@@ -186,6 +257,84 @@ function RegisterScreen({ onBack }: { onBack: () => void }) {
 
       <Pressable style={styles.linkButton} onPress={onBack}>
         <Text style={styles.linkButtonText}>Zurueck</Text>
+      </Pressable>
+    </ScrollView>
+  );
+}
+
+function DashboardScreen({
+  profile,
+  onLogout,
+}: {
+  profile: UserProfile;
+  onLogout: () => void;
+}) {
+  if (profile.role === 'admin') {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={styles.title}>Admin-Bereich</Text>
+        <Text style={styles.subtitle}>Hallo {profile.full_name ?? 'Admin'}.</Text>
+
+        <View style={styles.infoBox}>
+          <Text style={styles.infoTitle}>Naechster Schritt</Text>
+          <Text style={styles.infoText}>
+            Admins verwalten Filialen, Counter und Mitarbeiter.
+          </Text>
+        </View>
+
+        <Pressable style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Filialen verwalten</Text>
+        </Pressable>
+
+        <Pressable style={styles.secondaryButton} onPress={onLogout}>
+          <Text style={styles.secondaryButtonText}>Ausloggen</Text>
+        </Pressable>
+      </ScrollView>
+    );
+  }
+
+  if (profile.role === 'counter') {
+    return (
+      <ScrollView contentContainerStyle={styles.container}>
+        <Text style={styles.title}>Counter-Bereich</Text>
+        <Text style={styles.subtitle}>Hallo {profile.full_name ?? 'Counter'}.</Text>
+
+        <View style={styles.infoBox}>
+          <Text style={styles.infoTitle}>Naechster Schritt</Text>
+          <Text style={styles.infoText}>
+            Counter erstellen kurzfristige Auftraege fuer ihre Filiale.
+          </Text>
+        </View>
+
+        <Pressable style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Neuen Auftrag erstellen</Text>
+        </Pressable>
+
+        <Pressable style={styles.secondaryButton} onPress={onLogout}>
+          <Text style={styles.secondaryButtonText}>Ausloggen</Text>
+        </Pressable>
+      </ScrollView>
+    );
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Mitarbeiter-Bereich</Text>
+      <Text style={styles.subtitle}>Hallo {profile.full_name ?? 'Mitarbeiter'}.</Text>
+
+      <View style={styles.infoBox}>
+        <Text style={styles.infoTitle}>Naechster Schritt</Text>
+        <Text style={styles.infoText}>
+          Hier erscheinen offene Auftraege deiner Filiale.
+        </Text>
+      </View>
+
+      <Pressable style={styles.primaryButton}>
+        <Text style={styles.primaryButtonText}>Offene Auftraege anzeigen</Text>
+      </Pressable>
+
+      <Pressable style={styles.secondaryButton} onPress={onLogout}>
+        <Text style={styles.secondaryButtonText}>Ausloggen</Text>
       </Pressable>
     </ScrollView>
   );
@@ -261,6 +410,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#E0F2FE',
     padding: 18,
     borderRadius: 14,
+    marginBottom: 20,
   },
   infoTitle: {
     fontSize: 16,
