@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../services/auth_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -13,6 +16,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
 
+  bool isLoading = false;
+
   @override
   void dispose() {
     nameController.dispose();
@@ -22,12 +27,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  void _register() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Registrierung wird im nächsten Schritt mit Supabase verbunden.'),
-      ),
-    );
+  Future<void> _register() async {
+    setState(() => isLoading = true);
+
+    try {
+      final authService = AuthService(Supabase.instance.client);
+
+      await authService.signUpEmployee(
+        fullName: nameController.text,
+        phone: phoneController.text,
+        email: emailController.text,
+        password: passwordController.text,
+      );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Registrierung erfolgreich. Bitte E-Mail bestätigen.'),
+        ),
+      );
+
+      Navigator.of(context).pop();
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Registrierung fehlgeschlagen: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
+    }
   }
 
   @override
@@ -93,8 +125,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   const SizedBox(height: 24),
                   FilledButton(
-                    onPressed: _register,
-                    child: const Text('Registrieren'),
+                    onPressed: isLoading ? null : _register,
+                    child: isLoading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Registrieren'),
                   ),
                 ],
               ),
