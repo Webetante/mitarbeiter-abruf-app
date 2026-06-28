@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/branch.dart';
 import '../services/auth_service.dart';
+import '../services/branch_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -17,6 +19,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final passwordController = TextEditingController();
 
   bool isLoading = false;
+  bool isLoadingBranches = true;
+
+  List<Branch> branches = [];
+  String? selectedBranchId;
+  String? branchLoadError;
+
+  bool get _supabaseConfigured {
+    const url = String.fromEnvironment('SUPABASE_URL');
+    const key = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
+    return url.isNotEmpty && key.isNotEmpty;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBranches();
+  }
 
   @override
   void dispose() {
@@ -27,7 +46,44 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
+  Future<void> _loadBranches() async {
+    if (!_supabaseConfigured) {
+      setState(() {
+        isLoadingBranches = false;
+        branchLoadError = 'Supabase ist noch nicht konfiguriert.';
+      });
+      return;
+    }
+
+    try {
+      final branchService = BranchService(Supabase.instance.client);
+      final result = await branchService.fetchActiveBranches();
+
+      if (!mounted) return;
+
+      setState(() {
+        branches = result;
+        selectedBranchId = result.isNotEmpty ? result.first.id : null;
+        isLoadingBranches = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        branchLoadError = error.toString();
+        isLoadingBranches = false;
+      });
+    }
+  }
+
   Future<void> _register() async {
+    if (selectedBranchId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bitte eine Filiale auswählen.')),
+      );
+      return;
+    }
+
     setState(() => isLoading = true);
 
     try {
@@ -38,6 +94,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         phone: phoneController.text,
         email: emailController.text,
         password: passwordController.text,
+        branchId: selectedBranchId,
       );
 
       if (!mounted) return;
@@ -60,6 +117,47 @@ class _RegisterScreenState extends State<RegisterScreen> {
         setState(() => isLoading = false);
       }
     }
+  }
+
+  Widget _buildBranchField() {
+    if (isLoadingBranches) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (branchLoadError != null) {
+      return Text(
+        'Filialen konnten nicht geladen werden: $branchLoadError',
+        style: const TextStyle(color: Colors.orange),
+      );
+    }
+
+    if (branches.isEmpty) {
+      return const Text(
+        'Es wurden noch keine aktiven Filialen gefunden.',
+        style: TextStyle(color: Colors.orange),
+      );
+    }
+
+    return DropdownButtonFormField<String>(
+      value: selectedBranchId,
+      decoration: const InputDecoration(
+        labelText: 'Filiale',
+        border: OutlineInputBorder(),
+      ),
+      items: branches
+          .map(
+            (branch) => DropdownMenuItem<String>(
+              value: branch.id,
+              child: Text(branch.displayName),
+            ),
+          )
+          .toList(),
+      onChanged: isLoading
+          ? null
+          : (value) {
+              setState(() => selectedBranchId = value);
+            },
+    );
   }
 
   @override
@@ -123,6 +221,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       border: OutlineInputBorder(),
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  _buildBranchField(),
                   const SizedBox(height: 24),
                   FilledButton(
                     onPressed: isLoading ? null : _register,

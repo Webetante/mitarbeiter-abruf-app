@@ -8,6 +8,7 @@ class AuthService {
   Future<void> signIn({
     required String email,
     required String password,
+    String? branchId,
   }) async {
     await _client.auth.signInWithPassword(
       email: email.trim(),
@@ -20,6 +21,7 @@ class AuthService {
     required String phone,
     required String email,
     required String password,
+    String? branchId,
   }) async {
     final response = await _client.auth.signUp(
       email: email.trim(),
@@ -37,6 +39,7 @@ class AuthService {
       'full_name': fullName.trim(),
       'phone': phone.trim(),
       'role': 'employee',
+      'branch_id': branchId,
       'active': true,
     });
   }
