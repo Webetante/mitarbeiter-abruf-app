@@ -139,7 +139,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
 
     return DropdownButtonFormField<String>(
-      value: selectedBranchId,
+      initialValue: selectedBranchId,
       decoration: const InputDecoration(
         labelText: 'Filiale',
         border: OutlineInputBorder(),
