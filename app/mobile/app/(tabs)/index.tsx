@@ -289,27 +289,7 @@ function DashboardScreen({
   }
 
   if (profile.role === 'counter') {
-    return (
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Counter-Bereich</Text>
-        <Text style={styles.subtitle}>Hallo {profile.full_name ?? 'Counter'}.</Text>
-
-        <View style={styles.infoBox}>
-          <Text style={styles.infoTitle}>Naechster Schritt</Text>
-          <Text style={styles.infoText}>
-            Counter erstellen kurzfristige Auftraege fuer ihre Filiale.
-          </Text>
-        </View>
-
-        <Pressable style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>Neuen Auftrag erstellen</Text>
-        </Pressable>
-
-        <Pressable style={styles.secondaryButton} onPress={onLogout}>
-          <Text style={styles.secondaryButtonText}>Ausloggen</Text>
-        </Pressable>
-      </ScrollView>
-    );
+    return <CounterDashboard profile={profile} onLogout={onLogout} />;
   }
 
   return (
@@ -334,6 +314,301 @@ function DashboardScreen({
     </ScrollView>
   );
 }
+
+
+function CounterDashboard({
+  profile,
+  onLogout,
+}: {
+  profile: UserProfile;
+  onLogout: () => void;
+}) {
+  const [jobType, setJobType] = useState<'shift' | 'transfer' | 'support'>('shift');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+
+  const [shiftDate, setShiftDate] = useState('');
+  const [shiftStartTime, setShiftStartTime] = useState('');
+  const [shiftEndTime, setShiftEndTime] = useState('');
+
+  const [earliestStartDate, setEarliestStartDate] = useState('');
+  const [earliestStartTime, setEarliestStartTime] = useState('');
+  const [latestDeliveryDate, setLatestDeliveryDate] = useState('');
+  const [latestDeliveryTime, setLatestDeliveryTime] = useState('');
+  const [startCity, setStartCity] = useState('');
+  const [destinationCity, setDestinationCity] = useState('');
+
+  function buildDateTime(dateValue: string, timeValue: string) {
+    return `${dateValue.trim()}T${timeValue.trim()}:00`;
+  }
+
+  async function createJob() {
+    if (!profile.branch_id) {
+      Alert.alert('Filiale fehlt', 'Deinem Counter-Profil ist noch keine Filiale zugeordnet.');
+      return;
+    }
+
+    let payload: Record<string, unknown> = {
+      branch_id: profile.branch_id,
+      created_by: profile.id,
+      status: 'open',
+      required_acceptances: 1,
+      description: description.trim() || null,
+    };
+
+    if (jobType === 'shift') {
+      if (!shiftDate.trim() || !shiftStartTime.trim() || !shiftEndTime.trim()) {
+        Alert.alert('Angaben fehlen', 'Bitte Datum, Startzeit und Endzeit eingeben.');
+        return;
+      }
+
+      payload = {
+        ...payload,
+        title: title.trim() || 'Schicht - MA krank',
+        job_type: 'staff_replacement',
+        shift_date: shiftDate.trim(),
+        shift_start_time: shiftStartTime.trim(),
+        shift_end_time: shiftEndTime.trim(),
+        starts_at: buildDateTime(shiftDate, shiftStartTime),
+      };
+    }
+
+    if (jobType === 'transfer') {
+      if (
+        !startCity.trim() ||
+        !destinationCity.trim() ||
+        !earliestStartDate.trim() ||
+        !earliestStartTime.trim() ||
+        !latestDeliveryDate.trim() ||
+        !latestDeliveryTime.trim()
+      ) {
+        Alert.alert('Angaben fehlen', 'Bitte Startstadt, Zielstadt, fruehesten Start und spaeteste Auslieferung eingeben.');
+        return;
+      }
+
+      payload = {
+        ...payload,
+        title: title.trim() || 'Ueberfuehrung',
+        job_type: 'vehicle_transfer',
+        start_location: startCity.trim(),
+        destination_location: destinationCity.trim(),
+        earliest_start_at: buildDateTime(earliestStartDate, earliestStartTime),
+        latest_delivery_at: buildDateTime(latestDeliveryDate, latestDeliveryTime),
+        starts_at: buildDateTime(earliestStartDate, earliestStartTime),
+        shuttle_required: false,
+        required_acceptances: 1,
+      };
+    }
+
+    if (jobType === 'support') {
+      payload = {
+        ...payload,
+        title: title.trim() || 'Benoetige Unterstuetzung sofort',
+        job_type: 'other',
+        support_needed_immediately: true,
+        duration_unknown: true,
+        starts_at: new Date().toISOString(),
+      };
+    }
+
+    const { error } = await supabase.from('jobs').insert(payload);
+
+    if (error) {
+      Alert.alert('Auftrag konnte nicht erstellt werden', error.message);
+      return;
+    }
+
+    Alert.alert('Auftrag erstellt', 'Der Auftrag ist jetzt offen fuer Mitarbeiter.');
+
+    setTitle('');
+    setDescription('');
+    setShiftDate('');
+    setShiftStartTime('');
+    setShiftEndTime('');
+    setEarliestStartDate('');
+    setEarliestStartTime('');
+    setLatestDeliveryDate('');
+    setLatestDeliveryTime('');
+    setStartCity('');
+    setDestinationCity('');
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Counter-Bereich</Text>
+      <Text style={styles.subtitle}>Hallo {profile.full_name ?? 'Counter'}.</Text>
+
+      <View style={styles.infoBox}>
+        <Text style={styles.infoTitle}>Neuen Auftrag erstellen</Text>
+        <Text style={styles.infoText}>
+          Waehle den Auftragstyp und erfasse die wichtigsten Angaben.
+        </Text>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Auftragstyp</Text>
+
+        <Pressable
+          style={jobType === 'shift' ? styles.roleButtonActive : styles.roleButton}
+          onPress={() => setJobType('shift')}
+        >
+          <Text style={jobType === 'shift' ? styles.roleButtonTextActive : styles.roleButtonText}>
+            Schicht - MA krank
+          </Text>
+        </Pressable>
+
+        <Pressable
+          style={jobType === 'transfer' ? styles.roleButtonActive : styles.roleButton}
+          onPress={() => setJobType('transfer')}
+        >
+          <Text style={jobType === 'transfer' ? styles.roleButtonTextActive : styles.roleButtonText}>
+            Ueberfuehrung
+          </Text>
+        </Pressable>
+
+        <Pressable
+          style={jobType === 'support' ? styles.roleButtonActive : styles.roleButton}
+          onPress={() => setJobType('support')}
+        >
+          <Text style={jobType === 'support' ? styles.roleButtonTextActive : styles.roleButtonText}>
+            Benoetige Unterstuetzung sofort
+          </Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Details</Text>
+
+        <TextInput
+          style={styles.input}
+          placeholder="Titel optional"
+          placeholderTextColor="#475569"
+          value={title}
+          onChangeText={setTitle}
+        />
+
+        <TextInput
+          style={styles.input}
+          placeholder="Beschreibung / Hinweis optional"
+          placeholderTextColor="#475569"
+          value={description}
+          onChangeText={setDescription}
+          multiline
+        />
+
+        {jobType === 'shift' && (
+          <View>
+            <Text style={styles.selectLabel}>Datum</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="YYYY-MM-DD, z.B. 2026-06-28"
+              placeholderTextColor="#475569"
+              value={shiftDate}
+              onChangeText={setShiftDate}
+            />
+
+            <Text style={styles.selectLabel}>Von</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="HH:MM, z.B. 09:00"
+              placeholderTextColor="#475569"
+              value={shiftStartTime}
+              onChangeText={setShiftStartTime}
+            />
+
+            <Text style={styles.selectLabel}>Bis</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="HH:MM, z.B. 17:00"
+              placeholderTextColor="#475569"
+              value={shiftEndTime}
+              onChangeText={setShiftEndTime}
+            />
+          </View>
+        )}
+
+        {jobType === 'transfer' && (
+          <View>
+            <TextInput
+              style={styles.input}
+              placeholder="Startstadt"
+              placeholderTextColor="#475569"
+              value={startCity}
+              onChangeText={setStartCity}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Zielstadt"
+              placeholderTextColor="#475569"
+              value={destinationCity}
+              onChangeText={setDestinationCity}
+            />
+
+            <Text style={styles.selectLabel}>Fruehester Start</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Datum YYYY-MM-DD"
+              placeholderTextColor="#475569"
+              value={earliestStartDate}
+              onChangeText={setEarliestStartDate}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Uhrzeit HH:MM"
+              placeholderTextColor="#475569"
+              value={earliestStartTime}
+              onChangeText={setEarliestStartTime}
+            />
+
+            <Text style={styles.selectLabel}>Spaeteste Auslieferung</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Datum YYYY-MM-DD"
+              placeholderTextColor="#475569"
+              value={latestDeliveryDate}
+              onChangeText={setLatestDeliveryDate}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Uhrzeit HH:MM"
+              placeholderTextColor="#475569"
+              value={latestDeliveryTime}
+              onChangeText={setLatestDeliveryTime}
+            />
+
+            <View style={styles.infoBox}>
+              <Text style={styles.infoTitle}>Rueckfahrt</Text>
+              <Text style={styles.infoText}>
+                Der Mitarbeiter entscheidet spaeter beim Zusagen, ob er alleine zurueckkommt oder einen Shuttle-Fahrer braucht.
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {jobType === 'support' && (
+          <View style={styles.infoBox}>
+            <Text style={styles.infoTitle}>Sofortige Unterstuetzung</Text>
+            <Text style={styles.infoText}>
+              Dieser Auftrag startet sofort. Die Dauer ist unbekannt.
+            </Text>
+          </View>
+        )}
+
+        <Pressable style={styles.primaryButton} onPress={createJob}>
+          <Text style={styles.primaryButtonText}>Auftrag erstellen</Text>
+        </Pressable>
+      </View>
+
+      <Pressable style={styles.secondaryButton} onPress={onLogout}>
+        <Text style={styles.secondaryButtonText}>Ausloggen</Text>
+      </Pressable>
+    </ScrollView>
+  );
+}
+
 
 function AdminDashboard({
   profile,
@@ -873,6 +1148,20 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     textAlign: 'center',
+  },
+  dateButton: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#64748B',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 10,
+  },
+  dateButtonText: {
+    color: '#111827',
+    fontSize: 17,
+    fontWeight: '700',
   },
   roleButton: {
     backgroundColor: '#F3F4F6',
