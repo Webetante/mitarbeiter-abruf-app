@@ -22,6 +22,28 @@ type UserProfile = {
   active: boolean;
 };
 
+type Job = {
+  id: string;
+  title: string;
+  description: string | null;
+  job_type: string;
+  status: string;
+  branch_id: string;
+  start_location: string | null;
+  destination_location: string | null;
+  starts_at: string | null;
+  shift_date: string | null;
+  shift_start_time: string | null;
+  shift_end_time: string | null;
+  earliest_start_at: string | null;
+  latest_delivery_at: string | null;
+  support_needed_immediately: boolean | null;
+  duration_unknown: boolean | null;
+  shuttle_required: boolean | null;
+  required_acceptances: number | null;
+  created_at: string;
+};
+
 export default function HomeScreen() {
   const [screen, setScreen] = useState<Screen>('home');
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -119,6 +141,58 @@ function LoginScreen({
     }
 
     onLoggedIn(profile);
+  }
+
+  function jobTypeLabel(job: Job) {
+    if (job.job_type === 'staff_replacement') {
+      return 'Schicht - MA krank';
+    }
+
+    if (job.job_type === 'vehicle_transfer') {
+      return 'Ueberfuehrung';
+    }
+
+    if (job.support_needed_immediately) {
+      return 'Unterstuetzung sofort';
+    }
+
+    return 'Auftrag';
+  }
+
+  function statusLabel(status: string) {
+    if (status === 'open') {
+      return 'Offen';
+    }
+
+    if (status === 'accepted') {
+      return 'Angenommen';
+    }
+
+    if (status === 'completed') {
+      return 'Erledigt';
+    }
+
+    if (status === 'cancelled') {
+      return 'Abgebrochen';
+    }
+
+    return status;
+  }
+
+  function jobTimeLabel(job: Job) {
+    if (job.job_type === 'staff_replacement') {
+      return `${job.shift_date ?? 'Datum offen'} · ${job.shift_start_time ?? '?'} bis ${job.shift_end_time ?? '?'}`;
+    }
+
+    if (job.job_type === 'vehicle_transfer') {
+      return `Fruehester Start: ${job.earliest_start_at ?? job.starts_at ?? 'offen'} · Spaeteste Auslieferung: ${job.latest_delivery_at ?? 'offen'}`;
+    }
+
+    if (job.support_needed_immediately) {
+      return 'Sofort · Dauer unbekannt';
+    }
+
+    return job.starts_at ?? 'Zeit offen';
   }
 
   return (
@@ -337,10 +411,34 @@ function CounterDashboard({
   const [latestDeliveryTime, setLatestDeliveryTime] = useState('');
   const [startCity, setStartCity] = useState('');
   const [destinationCity, setDestinationCity] = useState('');
+  const [jobs, setJobs] = useState<Job[]>([]);
 
   function buildDateTime(dateValue: string, timeValue: string) {
     return `${dateValue.trim()}T${timeValue.trim()}:00`;
   }
+
+  async function loadBranchJobs() {
+    if (!profile.branch_id) {
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('jobs')
+      .select('id, title, description, job_type, status, branch_id, start_location, destination_location, starts_at, shift_date, shift_start_time, shift_end_time, earliest_start_at, latest_delivery_at, support_needed_immediately, duration_unknown, shuttle_required, required_acceptances, created_at')
+      .eq('branch_id', profile.branch_id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      Alert.alert('Auftraege konnten nicht geladen werden', error.message);
+      return;
+    }
+
+    setJobs((data ?? []) as Job[]);
+  }
+
+  useEffect(() => {
+    loadBranchJobs();
+  }, []);
 
   async function createJob() {
     if (!profile.branch_id) {
@@ -419,6 +517,7 @@ function CounterDashboard({
     }
 
     Alert.alert('Auftrag erstellt', 'Der Auftrag ist jetzt offen fuer Mitarbeiter.');
+    await loadBranchJobs();
 
     setTitle('');
     setDescription('');
@@ -431,6 +530,58 @@ function CounterDashboard({
     setLatestDeliveryTime('');
     setStartCity('');
     setDestinationCity('');
+  }
+
+  function jobTypeLabel(job: Job) {
+    if (job.job_type === 'staff_replacement') {
+      return 'Schicht - MA krank';
+    }
+
+    if (job.job_type === 'vehicle_transfer') {
+      return 'Ueberfuehrung';
+    }
+
+    if (job.support_needed_immediately) {
+      return 'Unterstuetzung sofort';
+    }
+
+    return 'Auftrag';
+  }
+
+  function statusLabel(status: string) {
+    if (status === 'open') {
+      return 'Offen';
+    }
+
+    if (status === 'accepted') {
+      return 'Angenommen';
+    }
+
+    if (status === 'completed') {
+      return 'Erledigt';
+    }
+
+    if (status === 'cancelled') {
+      return 'Abgebrochen';
+    }
+
+    return status;
+  }
+
+  function jobTimeLabel(job: Job) {
+    if (job.job_type === 'staff_replacement') {
+      return `${job.shift_date ?? 'Datum offen'} · ${job.shift_start_time ?? '?'} bis ${job.shift_end_time ?? '?'}`;
+    }
+
+    if (job.job_type === 'vehicle_transfer') {
+      return `Fruehester Start: ${job.earliest_start_at ?? job.starts_at ?? 'offen'} · Spaeteste Auslieferung: ${job.latest_delivery_at ?? 'offen'}`;
+    }
+
+    if (job.support_needed_immediately) {
+      return 'Sofort · Dauer unbekannt';
+    }
+
+    return job.starts_at ?? 'Zeit offen';
   }
 
   return (
@@ -600,6 +751,36 @@ function CounterDashboard({
         <Pressable style={styles.primaryButton} onPress={createJob}>
           <Text style={styles.primaryButtonText}>Auftrag erstellen</Text>
         </Pressable>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Auftraege meiner Filiale</Text>
+
+        <Pressable style={styles.neutralButton} onPress={loadBranchJobs}>
+          <Text style={styles.neutralButtonText}>Liste aktualisieren</Text>
+        </Pressable>
+
+        {jobs.length === 0 ? (
+          <Text style={styles.selectText}>Noch keine Auftraege vorhanden.</Text>
+        ) : (
+          jobs.map((job) => (
+            <View key={job.id} style={styles.branchCard}>
+              <Text style={styles.branchName}>{job.title}</Text>
+              <Text style={styles.branchMeta}>{jobTypeLabel(job)} · {statusLabel(job.status)}</Text>
+              <Text style={styles.branchMeta}>{jobTimeLabel(job)}</Text>
+
+              {job.job_type === 'vehicle_transfer' && (
+                <Text style={styles.branchMeta}>
+                  {job.start_location || 'Start offen'} → {job.destination_location || 'Ziel offen'}
+                </Text>
+              )}
+
+              {job.description ? (
+                <Text style={styles.branchMeta}>{job.description}</Text>
+              ) : null}
+            </View>
+          ))
+        )}
       </View>
 
       <Pressable style={styles.secondaryButton} onPress={onLogout}>
