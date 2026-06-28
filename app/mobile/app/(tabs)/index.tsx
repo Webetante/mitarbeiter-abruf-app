@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, TextInput, ScrollView, Alert } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 
 type Screen = 'home' | 'login' | 'register' | 'dashboard';
+type AdminSection = 'menu' | 'branches' | 'profiles';
+type UserRole = 'admin' | 'counter' | 'employee';
 
 type Branch = {
   id: string;
@@ -10,8 +12,6 @@ type Branch = {
   city: string | null;
   active: boolean;
 };
-
-type UserRole = 'admin' | 'counter' | 'employee';
 
 type UserProfile = {
   id: string;
@@ -63,11 +63,6 @@ export default function HomeScreen() {
       <Pressable style={styles.secondaryButton} onPress={() => setScreen('register')}>
         <Text style={styles.secondaryButtonText}>Registrieren</Text>
       </Pressable>
-
-      <View style={styles.infoBox}>
-        <Text style={styles.infoTitle}>Status</Text>
-        <Text style={styles.infoText}>Admin, Counter und Mitarbeiter-Bereiche sind vorbereitet.</Text>
-      </View>
     </View>
   );
 }
@@ -131,8 +126,24 @@ function LoginScreen({
       <Text style={styles.title}>Einloggen</Text>
       <Text style={styles.subtitle}>Melde dich mit deiner E-Mail-Adresse an.</Text>
 
-      <TextInput style={styles.input} placeholder="E-Mail" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
-      <TextInput style={styles.input} placeholder="Passwort" secureTextEntry value={password} onChangeText={setPassword} />
+      <TextInput
+        style={styles.input}
+        placeholder="E-Mail"
+        placeholderTextColor="#475569"
+        autoCapitalize="none"
+        keyboardType="email-address"
+        value={email}
+        onChangeText={setEmail}
+      />
+
+      <TextInput
+        style={styles.input}
+        placeholder="Passwort"
+        placeholderTextColor="#475569"
+        secureTextEntry
+        value={password}
+        onChangeText={setPassword}
+      />
 
       <Pressable style={styles.primaryButton} onPress={handleLogin}>
         <Text style={styles.primaryButtonText}>Einloggen</Text>
@@ -227,13 +238,13 @@ function RegisterScreen({
       <Text style={styles.title}>Registrieren</Text>
       <Text style={styles.subtitle}>Erstelle ein Mitarbeiter-Konto.</Text>
 
-      <TextInput style={styles.input} placeholder="Name" value={fullName} onChangeText={setFullName} />
-      <TextInput style={styles.input} placeholder="Telefon" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
-      <TextInput style={styles.input} placeholder="E-Mail" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
-      <TextInput style={styles.input} placeholder="Passwort" secureTextEntry value={password} onChangeText={setPassword} />
+      <TextInput style={styles.input} placeholder="Name" placeholderTextColor="#475569" value={fullName} onChangeText={setFullName} />
+      <TextInput style={styles.input} placeholder="Telefon" placeholderTextColor="#475569" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
+      <TextInput style={styles.input} placeholder="E-Mail" placeholderTextColor="#475569" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
+      <TextInput style={styles.input} placeholder="Passwort" placeholderTextColor="#475569" secureTextEntry value={password} onChangeText={setPassword} />
 
-      <View style={styles.selectBox}>
-        <Text style={styles.selectLabel}>Filiale</Text>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Filiale</Text>
 
         {branches.length === 0 ? (
           <Text style={styles.selectText}>Keine Filialen geladen.</Text>
@@ -331,14 +342,14 @@ function AdminDashboard({
   profile: UserProfile;
   onLogout: () => void;
 }) {
+  const [adminSection, setAdminSection] = useState<AdminSection>('menu');
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [newBranchName, setNewBranchName] = useState('');
   const [newBranchCity, setNewBranchCity] = useState('');
   const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
   const [editingBranchName, setEditingBranchName] = useState('');
   const [editingBranchCity, setEditingBranchCity] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [profiles, setProfiles] = useState<UserProfile[]>([]);
 
   async function loadBranches() {
     const { data, error } = await supabase
@@ -355,13 +366,10 @@ function AdminDashboard({
   }
 
   async function loadProfiles() {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, full_name, phone, role, branch_id, active')
-      .order('full_name');
+    const { data, error } = await supabase.rpc('admin_list_profiles');
 
     if (error) {
-      Alert.alert('Nutzer konnten nicht geladen werden', error.message);
+      Alert.alert('Mitarbeiter konnten nicht geladen werden', error.message);
       return;
     }
 
@@ -373,70 +381,17 @@ function AdminDashboard({
     loadProfiles();
   }, []);
 
-  async function updateProfileRole(user: UserProfile, role: UserRole) {
-    const { error } = await supabase
-      .from('profiles')
-      .update({ role })
-      .eq('id', user.id);
-
-    if (error) {
-      Alert.alert('Rolle konnte nicht geändert werden', error.message);
-      return;
-    }
-
-    await loadProfiles();
-  }
-
-  async function updateProfileBranch(user: UserProfile, branchId: string | null) {
-    const { error } = await supabase
-      .from('profiles')
-      .update({ branch_id: branchId })
-      .eq('id', user.id);
-
-    if (error) {
-      Alert.alert('Filiale konnte nicht geändert werden', error.message);
-      return;
-    }
-
-    await loadProfiles();
-  }
-
-  async function toggleProfileActive(user: UserProfile) {
-    if (user.id === profile.id && user.active) {
-      Alert.alert('Nicht möglich', 'Du kannst dich nicht selbst deaktivieren.');
-      return;
-    }
-
-    const { error } = await supabase
-      .from('profiles')
-      .update({ active: !user.active })
-      .eq('id', user.id);
-
-    if (error) {
-      Alert.alert('Nutzer konnte nicht aktualisiert werden', error.message);
-      return;
-    }
-
-    await loadProfiles();
-  }
-
   async function createBranch() {
     if (!newBranchName.trim()) {
       Alert.alert('Name fehlt', 'Bitte einen Filialnamen eingeben.');
       return;
     }
 
-    setLoading(true);
-
-    const { error } = await supabase
-      .from('branches')
-      .insert({
-        name: newBranchName.trim(),
-        city: newBranchCity.trim() || null,
-        active: true,
-      });
-
-    setLoading(false);
+    const { error } = await supabase.from('branches').insert({
+      name: newBranchName.trim(),
+      city: newBranchCity.trim() || null,
+      active: true,
+    });
 
     if (error) {
       Alert.alert('Filiale konnte nicht erstellt werden', error.message);
@@ -502,17 +457,14 @@ function AdminDashboard({
   async function deleteBranch(branch: Branch) {
     Alert.alert(
       'Filiale loeschen?',
-      `Soll "${branch.name}" wirklich geloescht werden? Besser ist oft deaktivieren, falls schon Auftraege oder Nutzer daran haengen.`,
+      `Soll "${branch.name}" wirklich geloescht werden?`,
       [
         { text: 'Abbrechen', style: 'cancel' },
         {
           text: 'Loeschen',
           style: 'destructive',
           onPress: async () => {
-            const { error } = await supabase
-              .from('branches')
-              .delete()
-              .eq('id', branch.id);
+            const { error } = await supabase.from('branches').delete().eq('id', branch.id);
 
             if (error) {
               Alert.alert('Filiale konnte nicht geloescht werden', error.message);
@@ -520,11 +472,36 @@ function AdminDashboard({
             }
 
             await loadBranches();
-            Alert.alert('Geloescht', 'Filiale wurde geloescht.');
           },
         },
       ]
     );
+  }
+
+  async function updateProfile(user: UserProfile, changes: Partial<UserProfile>) {
+    const nextProfile = {
+      ...user,
+      ...changes,
+    };
+
+    if (user.id === profile.id && user.active && nextProfile.active === false) {
+      Alert.alert('Nicht moeglich', 'Du kannst dich nicht selbst deaktivieren.');
+      return;
+    }
+
+    const { error } = await supabase.rpc('admin_update_profile', {
+      p_user_id: nextProfile.id,
+      p_role: nextProfile.role,
+      p_branch_id: nextProfile.branch_id,
+      p_active: nextProfile.active,
+    });
+
+    if (error) {
+      Alert.alert('Mitarbeiter konnte nicht aktualisiert werden', error.message);
+      return;
+    }
+
+    await loadProfiles();
   }
 
   return (
@@ -532,104 +509,186 @@ function AdminDashboard({
       <Text style={styles.title}>Admin-Bereich</Text>
       <Text style={styles.subtitle}>Hallo {profile.full_name ?? 'Admin'}.</Text>
 
-      <View style={styles.infoBox}>
-        <Text style={styles.infoTitle}>Filialen verwalten</Text>
-        <Text style={styles.infoText}>
-          Admins koennen Filialen anlegen, bearbeiten, deaktivieren oder loeschen.
-        </Text>
-      </View>
+      {adminSection === 'menu' && (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Verwaltung</Text>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Neue Filiale</Text>
+          <Pressable style={styles.primaryButton} onPress={() => setAdminSection('branches')}>
+            <Text style={styles.primaryButtonText}>Filialverwaltung</Text>
+          </Pressable>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Filialname"
-          value={newBranchName}
-          onChangeText={setNewBranchName}
-        />
+          <Pressable style={styles.primaryButton} onPress={() => setAdminSection('profiles')}>
+            <Text style={styles.primaryButtonText}>Mitarbeiterverwaltung</Text>
+          </Pressable>
+        </View>
+      )}
 
-        <TextInput
-          style={styles.input}
-          placeholder="Stadt"
-          value={newBranchCity}
-          onChangeText={setNewBranchCity}
-        />
+      {adminSection === 'branches' && (
+        <View>
+          <Pressable style={styles.neutralButton} onPress={() => setAdminSection('menu')}>
+            <Text style={styles.neutralButtonText}>Zurueck zum Admin-Menue</Text>
+          </Pressable>
 
-        <Pressable style={styles.primaryButton} onPress={createBranch} disabled={loading}>
-          <Text style={styles.primaryButtonText}>
-            {loading ? 'Speichert...' : 'Filiale anlegen'}
-          </Text>
-        </Pressable>
-      </View>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Neue Filiale</Text>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Bestehende Filialen</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Filialname"
+              placeholderTextColor="#475569"
+              value={newBranchName}
+              onChangeText={setNewBranchName}
+            />
 
-        {branches.length === 0 ? (
-          <Text style={styles.selectText}>Noch keine Filialen vorhanden.</Text>
-        ) : (
-          branches.map((branch) => {
-            const isEditing = editingBranchId === branch.id;
+            <TextInput
+              style={styles.input}
+              placeholder="Stadt"
+              placeholderTextColor="#475569"
+              value={newBranchCity}
+              onChangeText={setNewBranchCity}
+            />
 
-            return (
-              <View key={branch.id} style={styles.branchCard}>
-                {isEditing ? (
-                  <View>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Filialname"
-                      value={editingBranchName}
-                      onChangeText={setEditingBranchName}
-                    />
+            <Pressable style={styles.primaryButton} onPress={createBranch}>
+              <Text style={styles.primaryButtonText}>Filiale anlegen</Text>
+            </Pressable>
+          </View>
 
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Stadt"
-                      value={editingBranchCity}
-                      onChangeText={setEditingBranchCity}
-                    />
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Bestehende Filialen</Text>
 
-                    <Pressable style={styles.smallPrimaryButton} onPress={() => saveEditing(branch.id)}>
-                      <Text style={styles.smallButtonText}>Speichern</Text>
-                    </Pressable>
+            {branches.map((branch) => {
+              const isEditing = editingBranchId === branch.id;
 
-                    <Pressable style={styles.neutralButton} onPress={cancelEditing}>
-                      <Text style={styles.neutralButtonText}>Abbrechen</Text>
-                    </Pressable>
-                  </View>
-                ) : (
-                  <View>
-                    <View style={styles.branchCardText}>
+              return (
+                <View key={branch.id} style={styles.branchCard}>
+                  {isEditing ? (
+                    <View>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Filialname"
+                        placeholderTextColor="#475569"
+                        value={editingBranchName}
+                        onChangeText={setEditingBranchName}
+                      />
+
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Stadt"
+                        placeholderTextColor="#475569"
+                        value={editingBranchCity}
+                        onChangeText={setEditingBranchCity}
+                      />
+
+                      <Pressable style={styles.smallPrimaryButton} onPress={() => saveEditing(branch.id)}>
+                        <Text style={styles.smallButtonText}>Speichern</Text>
+                      </Pressable>
+
+                      <Pressable style={styles.neutralButton} onPress={cancelEditing}>
+                        <Text style={styles.neutralButtonText}>Abbrechen</Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <View>
                       <Text style={styles.branchName}>{branch.name}</Text>
                       <Text style={styles.branchMeta}>
                         {branch.city || 'Keine Stadt'} · {branch.active ? 'Aktiv' : 'Inaktiv'}
                       </Text>
+
+                      <Pressable style={styles.smallPrimaryButton} onPress={() => startEditing(branch)}>
+                        <Text style={styles.smallButtonText}>Bearbeiten</Text>
+                      </Pressable>
+
+                      <Pressable
+                        style={branch.active ? styles.warningButton : styles.smallPrimaryButton}
+                        onPress={() => toggleBranch(branch)}
+                      >
+                        <Text style={styles.smallButtonText}>
+                          {branch.active ? 'Deaktivieren' : 'Aktivieren'}
+                        </Text>
+                      </Pressable>
+
+                      <Pressable style={styles.dangerButton} onPress={() => deleteBranch(branch)}>
+                        <Text style={styles.smallButtonText}>Loeschen</Text>
+                      </Pressable>
                     </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      )}
 
-                    <Pressable style={styles.smallPrimaryButton} onPress={() => startEditing(branch)}>
-                      <Text style={styles.smallButtonText}>Bearbeiten</Text>
-                    </Pressable>
+      {adminSection === 'profiles' && (
+        <View>
+          <Pressable style={styles.neutralButton} onPress={() => setAdminSection('menu')}>
+            <Text style={styles.neutralButtonText}>Zurueck zum Admin-Menue</Text>
+          </Pressable>
 
-                    <Pressable
-                      style={branch.active ? styles.warningButton : styles.smallPrimaryButton}
-                      onPress={() => toggleBranch(branch)}
-                    >
-                      <Text style={styles.smallButtonText}>
-                        {branch.active ? 'Deaktivieren' : 'Aktivieren'}
-                      </Text>
-                    </Pressable>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Mitarbeiter verwalten</Text>
 
-                    <Pressable style={styles.dangerButton} onPress={() => deleteBranch(branch)}>
-                      <Text style={styles.smallButtonText}>Loeschen</Text>
-                    </Pressable>
-                  </View>
-                )}
+            {profiles.map((user) => (
+              <View key={user.id} style={styles.branchCard}>
+                <Text style={styles.branchName}>{user.full_name || 'Ohne Namen'}</Text>
+                <Text style={styles.branchMeta}>
+                  {user.phone || 'Keine Telefonnummer'} · {user.active ? 'Aktiv' : 'Inaktiv'}
+                </Text>
+                <Text style={styles.branchMeta}>Rolle: {user.role}</Text>
+
+                <Text style={styles.selectLabel}>Rolle</Text>
+
+                <Pressable
+                  style={user.role === 'employee' ? styles.roleButtonActive : styles.roleButton}
+                  onPress={() => updateProfile(user, { role: 'employee' })}
+                >
+                  <Text style={user.role === 'employee' ? styles.roleButtonTextActive : styles.roleButtonText}>Mitarbeiter</Text>
+                </Pressable>
+
+                <Pressable
+                  style={user.role === 'counter' ? styles.roleButtonActive : styles.roleButton}
+                  onPress={() => updateProfile(user, { role: 'counter' })}
+                >
+                  <Text style={user.role === 'counter' ? styles.roleButtonTextActive : styles.roleButtonText}>Counter</Text>
+                </Pressable>
+
+                <Pressable
+                  style={user.role === 'admin' ? styles.roleButtonActive : styles.roleButton}
+                  onPress={() => updateProfile(user, { role: 'admin' })}
+                >
+                  <Text style={user.role === 'admin' ? styles.roleButtonTextActive : styles.roleButtonText}>Admin</Text>
+                </Pressable>
+
+                <Text style={styles.selectLabel}>Filiale</Text>
+
+                {branches.map((branch) => (
+                  <Pressable
+                    key={branch.id}
+                    style={[
+                      styles.branchOption,
+                      user.branch_id === branch.id && styles.branchOptionSelected,
+                    ]}
+                    onPress={() => updateProfile(user, { branch_id: branch.id })}
+                  >
+                    <Text style={styles.branchOptionText}>
+                      {branch.name}{branch.city ? `, ${branch.city}` : ''}
+                    </Text>
+                  </Pressable>
+                ))}
+
+                <Pressable
+                  style={user.active ? styles.warningButton : styles.smallPrimaryButton}
+                  onPress={() => updateProfile(user, { active: !user.active })}
+                >
+                  <Text style={styles.smallButtonText}>
+                    {user.active ? 'Nutzer deaktivieren' : 'Nutzer aktivieren'}
+                  </Text>
+                </Pressable>
               </View>
-            );
-          })
-        )}
-      </View>
+            ))}
+          </View>
+        </View>
+      )}
 
       <Pressable style={styles.secondaryButton} onPress={onLogout}>
         <Text style={styles.secondaryButtonText}>Ausloggen</Text>
@@ -637,7 +696,6 @@ function AdminDashboard({
     </ScrollView>
   );
 }
-
 
 const styles = StyleSheet.create({
   container: {
@@ -661,14 +719,15 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   input: {
-    backgroundColor: 'white',
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#64748B',
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 17,
     marginBottom: 14,
+    color: '#111827',
   },
   primaryButton: {
     backgroundColor: '#2563EB',
@@ -722,19 +781,26 @@ const styles = StyleSheet.create({
     color: '#075985',
     lineHeight: 21,
   },
-  selectBox: {
+  card: {
     backgroundColor: 'white',
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 18,
+    borderColor: '#E5E7EB',
+  },
+  cardTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 14,
+    color: '#111827',
   },
   selectLabel: {
     fontSize: 14,
     fontWeight: '800',
     color: '#374151',
-    marginBottom: 10,
+    marginTop: 12,
+    marginBottom: 8,
   },
   selectText: {
     fontSize: 16,
@@ -755,48 +821,40 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontWeight: '600',
   },
-  card: {
-    backgroundColor: 'white',
-    borderRadius: 18,
-    padding: 18,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  cardTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    marginBottom: 14,
-    color: '#111827',
-  },
   branchCard: {
     backgroundColor: '#F8FAFC',
     borderRadius: 14,
     padding: 14,
     marginBottom: 12,
   },
-  branchCardText: {
-    marginBottom: 12,
-  },
   branchName: {
     fontSize: 17,
     fontWeight: '800',
     color: '#111827',
+    marginBottom: 4,
   },
   branchMeta: {
     fontSize: 14,
     color: '#6B7280',
-    marginTop: 3,
+    marginBottom: 8,
   },
   smallPrimaryButton: {
     backgroundColor: '#2563EB',
     paddingVertical: 10,
     borderRadius: 10,
+    marginBottom: 8,
+  },
+  warningButton: {
+    backgroundColor: '#D97706',
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginBottom: 8,
   },
   dangerButton: {
     backgroundColor: '#DC2626',
     paddingVertical: 10,
     borderRadius: 10,
+    marginBottom: 8,
   },
   smallButtonText: {
     color: 'white',
@@ -804,8 +862,17 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textAlign: 'center',
   },
-  roleRow: {
-    marginBottom: 12,
+  neutralButton: {
+    backgroundColor: '#E5E7EB',
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginBottom: 14,
+  },
+  neutralButtonText: {
+    color: '#111827',
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   roleButton: {
     backgroundColor: '#F3F4F6',
