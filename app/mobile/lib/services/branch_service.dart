@@ -15,7 +15,7 @@ class BranchService {
         .order('name');
 
     return response
-        .map<Branch>((item) => Branch.fromMap(item as Map<String, dynamic>))
+        .map<Branch>((item) => Branch.fromMap(item))
         .toList();
   }
 }
