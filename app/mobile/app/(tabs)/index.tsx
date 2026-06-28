@@ -1,7 +1,14 @@
-import { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, TextInput, ScrollView } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Text, Pressable, StyleSheet, TextInput, ScrollView, Alert } from 'react-native';
+import { supabase } from '../../lib/supabase';
 
 type Screen = 'home' | 'login' | 'register';
+
+type Branch = {
+  id: string;
+  name: string;
+  city: string | null;
+};
 
 export default function HomeScreen() {
   const [screen, setScreen] = useState<Screen>('home');
@@ -31,24 +38,36 @@ export default function HomeScreen() {
 
       <View style={styles.infoBox}>
         <Text style={styles.infoTitle}>Status</Text>
-        <Text style={styles.infoText}>
-          App laeuft auf dem Handy. Login und Registrierung werden jetzt vorbereitet.
-        </Text>
+        <Text style={styles.infoText}>Supabase ist verbunden. Filialen werden live geladen.</Text>
       </View>
     </View>
   );
 }
 
 function LoginScreen({ onBack }: { onBack: () => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  async function handleLogin() {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (error) {
+      Alert.alert('Login fehlgeschlagen', error.message);
+      return;
+    }
+
+    Alert.alert('Eingeloggt', 'Login war erfolgreich.');
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Einloggen</Text>
       <Text style={styles.subtitle}>Melde dich mit deiner E-Mail-Adresse an.</Text>
 
-      <TextInput style={styles.input} placeholder="E-Mail" autoCapitalize="none" keyboardType="email-address" />
-      <TextInput style={styles.input} placeholder="Passwort" secureTextEntry />
+      <TextInput style={styles.input} placeholder="E-Mail" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
+      <TextInput style={styles.input} placeholder="Passwort" secureTextEntry value={password} onChangeText={setPassword} />
 
-      <Pressable style={styles.primaryButton}>
+      <Pressable style={styles.primaryButton} onPress={handleLogin}>
         <Text style={styles.primaryButtonText}>Einloggen</Text>
       </Pressable>
 
@@ -60,22 +79,108 @@ function LoginScreen({ onBack }: { onBack: () => void }) {
 }
 
 function RegisterScreen({ onBack }: { onBack: () => void }) {
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('');
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  useEffect(() => {
+    async function loadBranches() {
+      const { data, error } = await supabase
+        .from('branches')
+        .select('id, name, city')
+        .eq('active', true)
+        .order('name');
+
+      if (error) {
+        Alert.alert('Filialen konnten nicht geladen werden', error.message);
+        return;
+      }
+
+      setBranches(data ?? []);
+
+      if (data && data.length > 0) {
+        setSelectedBranchId(data[0].id);
+      }
+    }
+
+    loadBranches();
+  }, []);
+
+  async function handleRegister() {
+    if (!fullName || !email || !password || !selectedBranchId) {
+      Alert.alert('Angaben fehlen', 'Bitte Name, E-Mail, Passwort und Filiale ausfuellen.');
+      return;
+    }
+
+    const { data, error } = await supabase.auth.signUp({ email, password });
+
+    if (error) {
+      Alert.alert('Registrierung fehlgeschlagen', error.message);
+      return;
+    }
+
+    const userId = data.user?.id;
+
+    if (!userId) {
+      Alert.alert('Fast fertig', 'Bitte bestaetige deine E-Mail-Adresse.');
+      return;
+    }
+
+    const { error: profileError } = await supabase.from('profiles').insert({
+      id: userId,
+      full_name: fullName,
+      phone,
+      role: 'employee',
+      branch_id: selectedBranchId,
+      active: true,
+    });
+
+    if (profileError) {
+      Alert.alert('Profil konnte nicht erstellt werden', profileError.message);
+      return;
+    }
+
+    Alert.alert('Registriert', 'Dein Mitarbeiter-Konto wurde erstellt.');
+    onBack();
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Registrieren</Text>
       <Text style={styles.subtitle}>Erstelle ein Mitarbeiter-Konto.</Text>
 
-      <TextInput style={styles.input} placeholder="Name" />
-      <TextInput style={styles.input} placeholder="Telefon" keyboardType="phone-pad" />
-      <TextInput style={styles.input} placeholder="E-Mail" autoCapitalize="none" keyboardType="email-address" />
-      <TextInput style={styles.input} placeholder="Passwort" secureTextEntry />
+      <TextInput style={styles.input} placeholder="Name" value={fullName} onChangeText={setFullName} />
+      <TextInput style={styles.input} placeholder="Telefon" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
+      <TextInput style={styles.input} placeholder="E-Mail" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} />
+      <TextInput style={styles.input} placeholder="Passwort" secureTextEntry value={password} onChangeText={setPassword} />
 
       <View style={styles.selectBox}>
         <Text style={styles.selectLabel}>Filiale</Text>
-        <Text style={styles.selectText}>Hamburg / Luebeck / Kiel folgt mit Supabase</Text>
+
+        {branches.length === 0 ? (
+          <Text style={styles.selectText}>Keine Filialen geladen.</Text>
+        ) : (
+          branches.map((branch) => (
+            <Pressable
+              key={branch.id}
+              style={[
+                styles.branchOption,
+                selectedBranchId === branch.id && styles.branchOptionSelected,
+              ]}
+              onPress={() => setSelectedBranchId(branch.id)}
+            >
+              <Text style={styles.branchOptionText}>
+                {branch.name}{branch.city ? `, ${branch.city}` : ''}
+              </Text>
+            </Pressable>
+          ))
+        )}
       </View>
 
-      <Pressable style={styles.primaryButton}>
+      <Pressable style={styles.primaryButton} onPress={handleRegister}>
         <Text style={styles.primaryButtonText}>Registrieren</Text>
       </Pressable>
 
@@ -180,10 +285,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     color: '#374151',
-    marginBottom: 6,
+    marginBottom: 10,
   },
   selectText: {
     fontSize: 16,
     color: '#6B7280',
+  },
+  branchOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    marginBottom: 8,
+    backgroundColor: '#F8FAFC',
+  },
+  branchOptionSelected: {
+    backgroundColor: '#DBEAFE',
+  },
+  branchOptionText: {
+    fontSize: 16,
+    color: '#111827',
+    fontWeight: '600',
   },
 });
