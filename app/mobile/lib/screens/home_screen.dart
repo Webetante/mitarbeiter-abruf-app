@@ -15,12 +15,13 @@ class HomeScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Mitarbeiter Abruf'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: Column(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -58,6 +59,7 @@ class HomeScreen extends StatelessWidget {
                   configured: _supabaseConfigured,
                 ),
               ],
+              ),
             ),
           ),
         ),
