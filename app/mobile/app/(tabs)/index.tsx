@@ -8,6 +8,7 @@ type Branch = {
   id: string;
   name: string;
   city: string | null;
+  active: boolean;
 };
 
 type UserProfile = {
@@ -28,7 +29,8 @@ export default function HomeScreen() {
     setScreen('dashboard');
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    await supabase.auth.signOut();
     setProfile(null);
     setScreen('home');
   }
@@ -62,7 +64,7 @@ export default function HomeScreen() {
 
       <View style={styles.infoBox}>
         <Text style={styles.infoTitle}>Status</Text>
-        <Text style={styles.infoText}>Login, Registrierung und Rollen sind vorbereitet.</Text>
+        <Text style={styles.infoText}>Admin, Counter und Mitarbeiter-Bereiche sind vorbereitet.</Text>
       </View>
     </View>
   );
@@ -159,7 +161,7 @@ function RegisterScreen({
     async function loadBranches() {
       const { data, error } = await supabase
         .from('branches')
-        .select('id, name, city')
+        .select('id, name, city, active')
         .eq('active', true)
         .order('name');
 
@@ -270,27 +272,7 @@ function DashboardScreen({
   onLogout: () => void;
 }) {
   if (profile.role === 'admin') {
-    return (
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Admin-Bereich</Text>
-        <Text style={styles.subtitle}>Hallo {profile.full_name ?? 'Admin'}.</Text>
-
-        <View style={styles.infoBox}>
-          <Text style={styles.infoTitle}>Naechster Schritt</Text>
-          <Text style={styles.infoText}>
-            Admins verwalten Filialen, Counter und Mitarbeiter.
-          </Text>
-        </View>
-
-        <Pressable style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>Filialen verwalten</Text>
-        </Pressable>
-
-        <Pressable style={styles.secondaryButton} onPress={onLogout}>
-          <Text style={styles.secondaryButtonText}>Ausloggen</Text>
-        </Pressable>
-      </ScrollView>
-    );
+    return <AdminDashboard profile={profile} onLogout={onLogout} />;
   }
 
   if (profile.role === 'counter') {
@@ -332,6 +314,150 @@ function DashboardScreen({
       <Pressable style={styles.primaryButton}>
         <Text style={styles.primaryButtonText}>Offene Auftraege anzeigen</Text>
       </Pressable>
+
+      <Pressable style={styles.secondaryButton} onPress={onLogout}>
+        <Text style={styles.secondaryButtonText}>Ausloggen</Text>
+      </Pressable>
+    </ScrollView>
+  );
+}
+
+function AdminDashboard({
+  profile,
+  onLogout,
+}: {
+  profile: UserProfile;
+  onLogout: () => void;
+}) {
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [newBranchName, setNewBranchName] = useState('');
+  const [newBranchCity, setNewBranchCity] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function loadBranches() {
+    const { data, error } = await supabase
+      .from('branches')
+      .select('id, name, city, active')
+      .order('name');
+
+    if (error) {
+      Alert.alert('Filialen konnten nicht geladen werden', error.message);
+      return;
+    }
+
+    setBranches(data ?? []);
+  }
+
+  useEffect(() => {
+    loadBranches();
+  }, []);
+
+  async function createBranch() {
+    if (!newBranchName.trim()) {
+      Alert.alert('Name fehlt', 'Bitte einen Filialnamen eingeben.');
+      return;
+    }
+
+    setLoading(true);
+
+    const { error } = await supabase
+      .from('branches')
+      .insert({
+        name: newBranchName.trim(),
+        city: newBranchCity.trim() || null,
+        active: true,
+      });
+
+    setLoading(false);
+
+    if (error) {
+      Alert.alert('Filiale konnte nicht erstellt werden', error.message);
+      return;
+    }
+
+    setNewBranchName('');
+    setNewBranchCity('');
+    await loadBranches();
+    Alert.alert('Gespeichert', 'Filiale wurde angelegt.');
+  }
+
+  async function toggleBranch(branch: Branch) {
+    const { error } = await supabase
+      .from('branches')
+      .update({ active: !branch.active })
+      .eq('id', branch.id);
+
+    if (error) {
+      Alert.alert('Filiale konnte nicht aktualisiert werden', error.message);
+      return;
+    }
+
+    await loadBranches();
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Admin-Bereich</Text>
+      <Text style={styles.subtitle}>Hallo {profile.full_name ?? 'Admin'}.</Text>
+
+      <View style={styles.infoBox}>
+        <Text style={styles.infoTitle}>Filialen verwalten</Text>
+        <Text style={styles.infoText}>
+          Admins koennen Filialen anlegen und aktiv oder inaktiv schalten.
+        </Text>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Neue Filiale</Text>
+
+        <TextInput
+          style={styles.input}
+          placeholder="Filialname"
+          value={newBranchName}
+          onChangeText={setNewBranchName}
+        />
+
+        <TextInput
+          style={styles.input}
+          placeholder="Stadt"
+          value={newBranchCity}
+          onChangeText={setNewBranchCity}
+        />
+
+        <Pressable style={styles.primaryButton} onPress={createBranch} disabled={loading}>
+          <Text style={styles.primaryButtonText}>
+            {loading ? 'Speichert...' : 'Filiale anlegen'}
+          </Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Bestehende Filialen</Text>
+
+        {branches.length === 0 ? (
+          <Text style={styles.selectText}>Noch keine Filialen vorhanden.</Text>
+        ) : (
+          branches.map((branch) => (
+            <View key={branch.id} style={styles.branchCard}>
+              <View style={styles.branchCardText}>
+                <Text style={styles.branchName}>{branch.name}</Text>
+                <Text style={styles.branchMeta}>
+                  {branch.city || 'Keine Stadt'} · {branch.active ? 'Aktiv' : 'Inaktiv'}
+                </Text>
+              </View>
+
+              <Pressable
+                style={branch.active ? styles.dangerButton : styles.smallPrimaryButton}
+                onPress={() => toggleBranch(branch)}
+              >
+                <Text style={styles.smallButtonText}>
+                  {branch.active ? 'Deaktivieren' : 'Aktivieren'}
+                </Text>
+              </Pressable>
+            </View>
+          ))
+        )}
+      </View>
 
       <Pressable style={styles.secondaryButton} onPress={onLogout}>
         <Text style={styles.secondaryButtonText}>Ausloggen</Text>
@@ -455,5 +581,54 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#111827',
     fontWeight: '600',
+  },
+  card: {
+    backgroundColor: 'white',
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  cardTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 14,
+    color: '#111827',
+  },
+  branchCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+  },
+  branchCardText: {
+    marginBottom: 12,
+  },
+  branchName: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  branchMeta: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginTop: 3,
+  },
+  smallPrimaryButton: {
+    backgroundColor: '#2563EB',
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  dangerButton: {
+    backgroundColor: '#DC2626',
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  smallButtonText: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
   },
 });
