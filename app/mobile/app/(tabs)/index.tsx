@@ -11,11 +11,13 @@ type Branch = {
   active: boolean;
 };
 
+type UserRole = 'admin' | 'counter' | 'employee';
+
 type UserProfile = {
   id: string;
   full_name: string | null;
   phone: string | null;
-  role: 'admin' | 'counter' | 'employee';
+  role: UserRole;
   branch_id: string | null;
   active: boolean;
 };
@@ -332,7 +334,11 @@ function AdminDashboard({
   const [branches, setBranches] = useState<Branch[]>([]);
   const [newBranchName, setNewBranchName] = useState('');
   const [newBranchCity, setNewBranchCity] = useState('');
+  const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
+  const [editingBranchName, setEditingBranchName] = useState('');
+  const [editingBranchCity, setEditingBranchCity] = useState('');
   const [loading, setLoading] = useState(false);
+  const [profiles, setProfiles] = useState<UserProfile[]>([]);
 
   async function loadBranches() {
     const { data, error } = await supabase
@@ -348,9 +354,71 @@ function AdminDashboard({
     setBranches(data ?? []);
   }
 
+  async function loadProfiles() {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, phone, role, branch_id, active')
+      .order('full_name');
+
+    if (error) {
+      Alert.alert('Nutzer konnten nicht geladen werden', error.message);
+      return;
+    }
+
+    setProfiles((data ?? []) as UserProfile[]);
+  }
+
   useEffect(() => {
     loadBranches();
+    loadProfiles();
   }, []);
+
+  async function updateProfileRole(user: UserProfile, role: UserRole) {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ role })
+      .eq('id', user.id);
+
+    if (error) {
+      Alert.alert('Rolle konnte nicht geändert werden', error.message);
+      return;
+    }
+
+    await loadProfiles();
+  }
+
+  async function updateProfileBranch(user: UserProfile, branchId: string | null) {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ branch_id: branchId })
+      .eq('id', user.id);
+
+    if (error) {
+      Alert.alert('Filiale konnte nicht geändert werden', error.message);
+      return;
+    }
+
+    await loadProfiles();
+  }
+
+  async function toggleProfileActive(user: UserProfile) {
+    if (user.id === profile.id && user.active) {
+      Alert.alert('Nicht möglich', 'Du kannst dich nicht selbst deaktivieren.');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ active: !user.active })
+      .eq('id', user.id);
+
+    if (error) {
+      Alert.alert('Nutzer konnte nicht aktualisiert werden', error.message);
+      return;
+    }
+
+    await loadProfiles();
+  }
 
   async function createBranch() {
     if (!newBranchName.trim()) {
@@ -381,6 +449,42 @@ function AdminDashboard({
     Alert.alert('Gespeichert', 'Filiale wurde angelegt.');
   }
 
+  function startEditing(branch: Branch) {
+    setEditingBranchId(branch.id);
+    setEditingBranchName(branch.name);
+    setEditingBranchCity(branch.city ?? '');
+  }
+
+  function cancelEditing() {
+    setEditingBranchId(null);
+    setEditingBranchName('');
+    setEditingBranchCity('');
+  }
+
+  async function saveEditing(branchId: string) {
+    if (!editingBranchName.trim()) {
+      Alert.alert('Name fehlt', 'Bitte einen Filialnamen eingeben.');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('branches')
+      .update({
+        name: editingBranchName.trim(),
+        city: editingBranchCity.trim() || null,
+      })
+      .eq('id', branchId);
+
+    if (error) {
+      Alert.alert('Filiale konnte nicht gespeichert werden', error.message);
+      return;
+    }
+
+    cancelEditing();
+    await loadBranches();
+    Alert.alert('Gespeichert', 'Filiale wurde aktualisiert.');
+  }
+
   async function toggleBranch(branch: Branch) {
     const { error } = await supabase
       .from('branches')
@@ -395,6 +499,34 @@ function AdminDashboard({
     await loadBranches();
   }
 
+  async function deleteBranch(branch: Branch) {
+    Alert.alert(
+      'Filiale loeschen?',
+      `Soll "${branch.name}" wirklich geloescht werden? Besser ist oft deaktivieren, falls schon Auftraege oder Nutzer daran haengen.`,
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        {
+          text: 'Loeschen',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase
+              .from('branches')
+              .delete()
+              .eq('id', branch.id);
+
+            if (error) {
+              Alert.alert('Filiale konnte nicht geloescht werden', error.message);
+              return;
+            }
+
+            await loadBranches();
+            Alert.alert('Geloescht', 'Filiale wurde geloescht.');
+          },
+        },
+      ]
+    );
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Admin-Bereich</Text>
@@ -403,7 +535,7 @@ function AdminDashboard({
       <View style={styles.infoBox}>
         <Text style={styles.infoTitle}>Filialen verwalten</Text>
         <Text style={styles.infoText}>
-          Admins koennen Filialen anlegen und aktiv oder inaktiv schalten.
+          Admins koennen Filialen anlegen, bearbeiten, deaktivieren oder loeschen.
         </Text>
       </View>
 
@@ -437,25 +569,65 @@ function AdminDashboard({
         {branches.length === 0 ? (
           <Text style={styles.selectText}>Noch keine Filialen vorhanden.</Text>
         ) : (
-          branches.map((branch) => (
-            <View key={branch.id} style={styles.branchCard}>
-              <View style={styles.branchCardText}>
-                <Text style={styles.branchName}>{branch.name}</Text>
-                <Text style={styles.branchMeta}>
-                  {branch.city || 'Keine Stadt'} · {branch.active ? 'Aktiv' : 'Inaktiv'}
-                </Text>
-              </View>
+          branches.map((branch) => {
+            const isEditing = editingBranchId === branch.id;
 
-              <Pressable
-                style={branch.active ? styles.dangerButton : styles.smallPrimaryButton}
-                onPress={() => toggleBranch(branch)}
-              >
-                <Text style={styles.smallButtonText}>
-                  {branch.active ? 'Deaktivieren' : 'Aktivieren'}
-                </Text>
-              </Pressable>
-            </View>
-          ))
+            return (
+              <View key={branch.id} style={styles.branchCard}>
+                {isEditing ? (
+                  <View>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Filialname"
+                      value={editingBranchName}
+                      onChangeText={setEditingBranchName}
+                    />
+
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Stadt"
+                      value={editingBranchCity}
+                      onChangeText={setEditingBranchCity}
+                    />
+
+                    <Pressable style={styles.smallPrimaryButton} onPress={() => saveEditing(branch.id)}>
+                      <Text style={styles.smallButtonText}>Speichern</Text>
+                    </Pressable>
+
+                    <Pressable style={styles.neutralButton} onPress={cancelEditing}>
+                      <Text style={styles.neutralButtonText}>Abbrechen</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <View>
+                    <View style={styles.branchCardText}>
+                      <Text style={styles.branchName}>{branch.name}</Text>
+                      <Text style={styles.branchMeta}>
+                        {branch.city || 'Keine Stadt'} · {branch.active ? 'Aktiv' : 'Inaktiv'}
+                      </Text>
+                    </View>
+
+                    <Pressable style={styles.smallPrimaryButton} onPress={() => startEditing(branch)}>
+                      <Text style={styles.smallButtonText}>Bearbeiten</Text>
+                    </Pressable>
+
+                    <Pressable
+                      style={branch.active ? styles.warningButton : styles.smallPrimaryButton}
+                      onPress={() => toggleBranch(branch)}
+                    >
+                      <Text style={styles.smallButtonText}>
+                        {branch.active ? 'Deaktivieren' : 'Aktivieren'}
+                      </Text>
+                    </Pressable>
+
+                    <Pressable style={styles.dangerButton} onPress={() => deleteBranch(branch)}>
+                      <Text style={styles.smallButtonText}>Loeschen</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+            );
+          })
         )}
       </View>
 
@@ -465,6 +637,7 @@ function AdminDashboard({
     </ScrollView>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: {
@@ -626,6 +799,37 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   smallButtonText: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  roleRow: {
+    marginBottom: 12,
+  },
+  roleButton: {
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  roleButtonActive: {
+    backgroundColor: '#2563EB',
+    borderWidth: 1,
+    borderColor: '#2563EB',
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  roleButtonText: {
+    color: '#111827',
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  roleButtonTextActive: {
     color: 'white',
     fontSize: 15,
     fontWeight: '800',
