@@ -410,6 +410,26 @@ function DashboardScreen({
 }
 
 
+async function sendPushNotification(
+  mode: 'new_job' | 'cancelled_job',
+  jobId: string,
+  title: string,
+  body: string
+) {
+  const { error } = await supabase.functions.invoke('send-push', {
+    body: {
+      mode,
+      jobId,
+      title,
+      body,
+    },
+  });
+
+  if (error) {
+    console.log('Push konnte nicht gesendet werden:', error.message);
+  }
+}
+
 async function registerPushToken(profile: UserProfile) {
   if (profile.role !== 'employee') {
     return;
@@ -933,11 +953,24 @@ function CounterDashboard({
       };
     }
 
-    const { error } = await supabase.from('jobs').insert(payload);
+    const { data: createdJob, error } = await supabase
+      .from('jobs')
+      .insert(payload)
+      .select('id, title')
+      .single();
 
     if (error) {
       Alert.alert('Auftrag konnte nicht erstellt werden', error.message);
       return;
+    }
+
+    if (createdJob?.id) {
+      await sendPushNotification(
+        'new_job',
+        createdJob.id,
+        'Neuer Auftrag',
+        `${createdJob.title ?? 'Ein neuer Auftrag'} ist verfuegbar.`
+      );
     }
 
     Alert.alert('Auftrag erstellt', 'Der Auftrag ist jetzt offen fuer Mitarbeiter.');
@@ -1002,6 +1035,13 @@ function CounterDashboard({
       Alert.alert('Storno nicht moeglich', error.message);
       return;
     }
+
+    await sendPushNotification(
+      'cancelled_job',
+      job.id,
+      'Auftrag storniert',
+      `${job.title} wurde storniert.`
+    );
 
     Alert.alert('Auftrag storniert', 'Der Auftrag wurde storniert.');
     await loadBranchJobs();
