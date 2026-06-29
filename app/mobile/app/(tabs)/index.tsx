@@ -43,6 +43,9 @@ type Job = {
   required_acceptances: number | null;
   accepted_by: string | null;
   accepted_at: string | null;
+  accepted_by_name: string | null;
+  main_driver_name: string | null;
+  shuttle_driver_name: string | null;
   created_at: string;
 };
 
@@ -404,15 +407,10 @@ function EmployeeDashboard({
   onLogout: () => void;
 }) {
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [debugInfo, setDebugInfo] = useState('Noch nicht geladen');
+  const [myJobs, setMyJobs] = useState<Job[]>([]);
 
   async function loadOpenJobs() {
-    setDebugInfo(
-      `Profil: Rolle=${profile.role}, aktiv=${profile.active ? 'ja' : 'nein'}, Filiale=${profile.branch_id ?? 'keine'}`
-    );
-
     if (!profile.branch_id) {
-      setDebugInfo('Keine Filiale im Mitarbeiter-Profil hinterlegt.');
       return;
     }
 
@@ -420,19 +418,28 @@ function EmployeeDashboard({
       .rpc('employee_list_open_jobs');
 
     if (error) {
-      setDebugInfo(`Supabase-Fehler: ${error.message}`);
       Alert.alert('Auftraege konnten nicht geladen werden', error.message);
       return;
     }
 
     setJobs((data ?? []) as Job[]);
-    setDebugInfo(
-      `Profil: Rolle=${profile.role}, aktiv=${profile.active ? 'ja' : 'nein'}, Filiale=${profile.branch_id}. Gefundene Auftraege: ${(data ?? []).length}`
-    );
+  }
+
+  async function loadMyJobs() {
+    const { data, error } = await supabase
+      .rpc('employee_list_my_jobs');
+
+    if (error) {
+      Alert.alert('Meine Auftraege konnten nicht geladen werden', error.message);
+      return;
+    }
+
+    setMyJobs((data ?? []) as Job[]);
   }
 
   useEffect(() => {
     loadOpenJobs();
+    loadMyJobs();
   }, []);
 
   function jobTypeLabel(job: Job) {
@@ -449,6 +456,26 @@ function EmployeeDashboard({
     }
 
     return 'Auftrag';
+  }
+
+  function statusLabel(status: string) {
+    if (status === 'open') {
+      return 'Offen';
+    }
+
+    if (status === 'accepted') {
+      return 'Angenommen';
+    }
+
+    if (status === 'completed') {
+      return 'Erledigt';
+    }
+
+    if (status === 'cancelled') {
+      return 'Storniert';
+    }
+
+    return status;
   }
 
   function jobTimeLabel(job: Job) {
@@ -498,6 +525,7 @@ function EmployeeDashboard({
 
     Alert.alert('Zugesagt', 'Du hast den Auftrag angenommen.');
     await loadOpenJobs();
+    await loadMyJobs();
   }
 
   async function acceptTransferAlone(job: Job) {
@@ -533,6 +561,7 @@ function EmployeeDashboard({
 
     Alert.alert('Zugesagt', 'Du hast die Ueberfuehrung angenommen und kommst alleine zurueck.');
     await loadOpenJobs();
+    await loadMyJobs();
   }
 
   async function acceptTransferNeedsShuttle(job: Job) {
@@ -568,6 +597,7 @@ function EmployeeDashboard({
 
     Alert.alert('Zugesagt', 'Du hast die Ueberfuehrung angenommen. Ein Shuttle-Fahrer wird noch gesucht.');
     await loadOpenJobs();
+    await loadMyJobs();
   }
 
   async function acceptAsShuttle(job: Job) {
@@ -599,16 +629,11 @@ function EmployeeDashboard({
 
     Alert.alert('Zugesagt', 'Du bist als Shuttle-Fahrer eingetragen.');
     await loadOpenJobs();
+    await loadMyJobs();
   }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <View style={{ backgroundColor: '#DC2626', padding: 20, borderRadius: 16, marginBottom: 20 }}>
-        <Text style={{ color: '#FFFFFF', fontSize: 24, fontWeight: '900', textAlign: 'center' }}>
-          TEST MITARBEITER SCREEN AKTUELL
-        </Text>
-      </View>
-
       <Text style={styles.title}>Mitarbeiter-Bereich</Text>
       <Text style={styles.subtitle}>Hallo {profile.full_name ?? 'Mitarbeiter'}.</Text>
 
@@ -622,17 +647,12 @@ function EmployeeDashboard({
       <Pressable
         style={styles.neutralButton}
         onPress={() => {
-          Alert.alert('Test', 'Button wurde gedrueckt.');
           loadOpenJobs();
+          loadMyJobs();
         }}
       >
         <Text style={styles.neutralButtonText}>Liste aktualisieren</Text>
       </Pressable>
-
-      <View style={styles.infoBox}>
-        <Text style={styles.infoTitle}>Diagnose</Text>
-        <Text style={styles.infoText}>{debugInfo}</Text>
-      </View>
 
       {jobs.length === 0 ? (
         <View style={styles.card}>
@@ -678,6 +698,41 @@ function EmployeeDashboard({
         ))
       )}
 
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Meine zugesagten Auftraege</Text>
+
+        {myJobs.length === 0 ? (
+          <Text style={styles.selectText}>Du hast noch keinen Auftrag zugesagt.</Text>
+        ) : (
+          myJobs.map((job) => (
+            <View key={job.id} style={styles.branchCard}>
+              <Text style={styles.branchName}>{job.title}</Text>
+              <Text style={styles.branchMeta}>{jobTypeLabel(job)} · {statusLabel(job.status)}</Text>
+              <Text style={styles.branchMeta}>{jobTimeLabel(job)}</Text>
+
+              {job.job_type === 'vehicle_transfer' && (
+                <Text style={styles.branchMeta}>
+                  {job.start_location || 'Start offen'} → {job.destination_location || 'Ziel offen'}
+                </Text>
+              )}
+
+              {job.status === 'cancelled' && (
+                <View style={styles.infoBox}>
+                  <Text style={styles.infoTitle}>Storniert</Text>
+                  <Text style={styles.infoText}>
+                    Dieser Auftrag wurde vom Counter storniert.
+                  </Text>
+                </View>
+              )}
+
+              {job.description ? (
+                <Text style={styles.branchMeta}>{job.description}</Text>
+              ) : null}
+            </View>
+          ))
+        )}
+      </View>
+
       <Pressable style={styles.secondaryButton} onPress={onLogout}>
         <Text style={styles.secondaryButtonText}>Ausloggen</Text>
       </Pressable>
@@ -719,10 +774,7 @@ function CounterDashboard({
     }
 
     const { data, error } = await supabase
-      .from('jobs')
-      .select('id, title, description, job_type, status, branch_id, start_location, destination_location, starts_at, shift_date, shift_start_time, shift_end_time, earliest_start_at, latest_delivery_at, support_needed_immediately, duration_unknown, shuttle_required, required_acceptances, created_at')
-      .eq('branch_id', profile.branch_id)
-      .order('created_at', { ascending: false });
+      .rpc('counter_list_branch_jobs');
 
     if (error) {
       Alert.alert('Auftraege konnten nicht geladen werden', error.message);
@@ -858,10 +910,25 @@ function CounterDashboard({
     }
 
     if (status === 'cancelled') {
-      return 'Abgebrochen';
+      return 'Storniert';
     }
 
     return status;
+  }
+
+  async function cancelJob(job: Job) {
+    const { error } = await supabase
+      .from('jobs')
+      .update({ status: 'cancelled' })
+      .eq('id', job.id);
+
+    if (error) {
+      Alert.alert('Storno nicht moeglich', error.message);
+      return;
+    }
+
+    Alert.alert('Auftrag storniert', 'Der Auftrag wurde storniert.');
+    await loadBranchJobs();
   }
 
   function jobTimeLabel(job: Job) {
@@ -1074,6 +1141,38 @@ function CounterDashboard({
               {job.description ? (
                 <Text style={styles.branchMeta}>{job.description}</Text>
               ) : null}
+
+              {job.status === 'accepted' && (
+                <View style={styles.infoBox}>
+                  <Text style={styles.infoTitle}>Zusage</Text>
+                  {job.job_type === 'vehicle_transfer' ? (
+                    <Text style={styles.infoText}>
+                      Hauptfahrer: {job.main_driver_name || job.accepted_by_name || 'noch unbekannt'}
+                      {'\n'}Shuttle-Fahrer: {job.shuttle_driver_name || (job.shuttle_required ? 'noch offen' : 'nicht benoetigt')}
+                    </Text>
+                  ) : (
+                    <Text style={styles.infoText}>
+                      Angenommen von: {job.accepted_by_name || job.main_driver_name || 'noch unbekannt'}
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {job.status === 'open' && job.job_type === 'vehicle_transfer' && job.shuttle_required && (
+                <View style={styles.infoBox}>
+                  <Text style={styles.infoTitle}>Shuttle offen</Text>
+                  <Text style={styles.infoText}>
+                    Hauptfahrer: {job.main_driver_name || job.accepted_by_name || 'noch unbekannt'}
+                    {'\n'}Shuttle-Fahrer wird noch gesucht.
+                  </Text>
+                </View>
+              )}
+
+              {job.status !== 'cancelled' && job.status !== 'completed' && (
+                <Pressable style={styles.dangerButton} onPress={() => cancelJob(job)}>
+                  <Text style={styles.dangerButtonText}>Auftrag stornieren</Text>
+                </Pressable>
+              )}
             </View>
           ))
         )}
