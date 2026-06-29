@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import Constants from 'expo-constants';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 type Screen = 'home' | 'login' | 'register' | 'dashboard';
 type AdminSection = 'menu' | 'branches' | 'profiles';
@@ -399,6 +410,70 @@ function DashboardScreen({
 }
 
 
+async function registerPushToken(profile: UserProfile) {
+  if (profile.role !== 'employee') {
+    return;
+  }
+
+  try {
+    if (!Device.isDevice) {
+      console.log('Push: kein echtes Geraet.');
+      return;
+    }
+
+    const existingPermission = await Notifications.getPermissionsAsync();
+    let finalStatus = existingPermission.status;
+
+    if (finalStatus !== 'granted') {
+      const requestedPermission = await Notifications.requestPermissionsAsync();
+      finalStatus = requestedPermission.status;
+    }
+
+    if (finalStatus !== 'granted') {
+      console.log('Push: nicht erlaubt.');
+      return;
+    }
+
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ??
+      Constants.easConfig?.projectId;
+
+    if (!projectId) {
+      console.log('Push: projectId fehlt. Spaeter mit Development Build aktivieren.');
+      return;
+    }
+
+    const tokenResult = await Notifications.getExpoPushTokenAsync({ projectId });
+    const expoPushToken = tokenResult.data;
+
+    const { error } = await supabase
+      .from('device_tokens')
+      .upsert(
+        {
+          user_id: profile.id,
+          token: expoPushToken,
+          expo_push_token: expoPushToken,
+          platform: Platform.OS,
+          active: true,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: 'user_id,token',
+        }
+      );
+
+    if (error) {
+      console.log('Push Token konnte nicht gespeichert werden:', error.message);
+      return;
+    }
+
+    console.log('Push Token gespeichert.');
+  } catch (error) {
+    console.log('Push aktuell nicht aktiv:', error);
+  }
+}
+
+
 function EmployeeDashboard({
   profile,
   onLogout,
@@ -438,6 +513,7 @@ function EmployeeDashboard({
   }
 
   useEffect(() => {
+    registerPushToken(profile);
     loadOpenJobs();
     loadMyJobs();
   }, []);
