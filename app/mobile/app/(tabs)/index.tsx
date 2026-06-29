@@ -41,6 +41,8 @@ type Job = {
   duration_unknown: boolean | null;
   shuttle_required: boolean | null;
   required_acceptances: number | null;
+  accepted_by: string | null;
+  accepted_at: string | null;
   created_at: string;
 };
 
@@ -366,6 +368,10 @@ function DashboardScreen({
     return <CounterDashboard profile={profile} onLogout={onLogout} />;
   }
 
+  if (profile.role === 'employee') {
+    return <EmployeeDashboard profile={profile} onLogout={onLogout} />;
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Mitarbeiter-Bereich</Text>
@@ -381,6 +387,296 @@ function DashboardScreen({
       <Pressable style={styles.primaryButton}>
         <Text style={styles.primaryButtonText}>Offene Auftraege anzeigen</Text>
       </Pressable>
+
+      <Pressable style={styles.secondaryButton} onPress={onLogout}>
+        <Text style={styles.secondaryButtonText}>Ausloggen</Text>
+      </Pressable>
+    </ScrollView>
+  );
+}
+
+
+function EmployeeDashboard({
+  profile,
+  onLogout,
+}: {
+  profile: UserProfile;
+  onLogout: () => void;
+}) {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [debugInfo, setDebugInfo] = useState('Noch nicht geladen');
+
+  async function loadOpenJobs() {
+    setDebugInfo(
+      `Profil: Rolle=${profile.role}, aktiv=${profile.active ? 'ja' : 'nein'}, Filiale=${profile.branch_id ?? 'keine'}`
+    );
+
+    if (!profile.branch_id) {
+      setDebugInfo('Keine Filiale im Mitarbeiter-Profil hinterlegt.');
+      return;
+    }
+
+    const { data, error } = await supabase
+      .rpc('employee_list_open_jobs');
+
+    if (error) {
+      setDebugInfo(`Supabase-Fehler: ${error.message}`);
+      Alert.alert('Auftraege konnten nicht geladen werden', error.message);
+      return;
+    }
+
+    setJobs((data ?? []) as Job[]);
+    setDebugInfo(
+      `Profil: Rolle=${profile.role}, aktiv=${profile.active ? 'ja' : 'nein'}, Filiale=${profile.branch_id}. Gefundene Auftraege: ${(data ?? []).length}`
+    );
+  }
+
+  useEffect(() => {
+    loadOpenJobs();
+  }, []);
+
+  function jobTypeLabel(job: Job) {
+    if (job.job_type === 'staff_replacement') {
+      return 'Schicht - MA krank';
+    }
+
+    if (job.job_type === 'vehicle_transfer') {
+      return 'Ueberfuehrung';
+    }
+
+    if (job.support_needed_immediately) {
+      return 'Unterstuetzung sofort';
+    }
+
+    return 'Auftrag';
+  }
+
+  function jobTimeLabel(job: Job) {
+    if (job.job_type === 'staff_replacement') {
+      return `${job.shift_date ?? 'Datum offen'} · ${job.shift_start_time ?? '?'} bis ${job.shift_end_time ?? '?'}`;
+    }
+
+    if (job.job_type === 'vehicle_transfer') {
+      return `Fruehester Start: ${job.earliest_start_at ?? job.starts_at ?? 'offen'} · Spaeteste Auslieferung: ${job.latest_delivery_at ?? 'offen'}`;
+    }
+
+    if (job.support_needed_immediately) {
+      return 'Sofort · Dauer unbekannt';
+    }
+
+    return job.starts_at ?? 'Zeit offen';
+  }
+
+  async function acceptNormalJob(job: Job) {
+    const { error: acceptanceError } = await supabase
+      .from('job_acceptances')
+      .insert({
+        job_id: job.id,
+        user_id: profile.id,
+        acceptance_role: 'main',
+        returns_alone: true,
+      });
+
+    if (acceptanceError) {
+      Alert.alert('Zusage nicht moeglich', acceptanceError.message);
+      return;
+    }
+
+    const { error: updateError } = await supabase
+      .from('jobs')
+      .update({
+        status: 'accepted',
+        accepted_by: profile.id,
+        accepted_at: new Date().toISOString(),
+      })
+      .eq('id', job.id);
+
+    if (updateError) {
+      Alert.alert('Auftrag konnte nicht aktualisiert werden', updateError.message);
+      return;
+    }
+
+    Alert.alert('Zugesagt', 'Du hast den Auftrag angenommen.');
+    await loadOpenJobs();
+  }
+
+  async function acceptTransferAlone(job: Job) {
+    const { error: acceptanceError } = await supabase
+      .from('job_acceptances')
+      .insert({
+        job_id: job.id,
+        user_id: profile.id,
+        acceptance_role: 'main',
+        returns_alone: true,
+      });
+
+    if (acceptanceError) {
+      Alert.alert('Zusage nicht moeglich', acceptanceError.message);
+      return;
+    }
+
+    const { error: updateError } = await supabase
+      .from('jobs')
+      .update({
+        status: 'accepted',
+        accepted_by: profile.id,
+        accepted_at: new Date().toISOString(),
+        shuttle_required: false,
+        required_acceptances: 1,
+      })
+      .eq('id', job.id);
+
+    if (updateError) {
+      Alert.alert('Auftrag konnte nicht aktualisiert werden', updateError.message);
+      return;
+    }
+
+    Alert.alert('Zugesagt', 'Du hast die Ueberfuehrung angenommen und kommst alleine zurueck.');
+    await loadOpenJobs();
+  }
+
+  async function acceptTransferNeedsShuttle(job: Job) {
+    const { error: acceptanceError } = await supabase
+      .from('job_acceptances')
+      .insert({
+        job_id: job.id,
+        user_id: profile.id,
+        acceptance_role: 'main',
+        returns_alone: false,
+      });
+
+    if (acceptanceError) {
+      Alert.alert('Zusage nicht moeglich', acceptanceError.message);
+      return;
+    }
+
+    const { error: updateError } = await supabase
+      .from('jobs')
+      .update({
+        accepted_by: profile.id,
+        accepted_at: new Date().toISOString(),
+        shuttle_required: true,
+        required_acceptances: 2,
+        status: 'open',
+      })
+      .eq('id', job.id);
+
+    if (updateError) {
+      Alert.alert('Auftrag konnte nicht aktualisiert werden', updateError.message);
+      return;
+    }
+
+    Alert.alert('Zugesagt', 'Du hast die Ueberfuehrung angenommen. Ein Shuttle-Fahrer wird noch gesucht.');
+    await loadOpenJobs();
+  }
+
+  async function acceptAsShuttle(job: Job) {
+    const { error: acceptanceError } = await supabase
+      .from('job_acceptances')
+      .insert({
+        job_id: job.id,
+        user_id: profile.id,
+        acceptance_role: 'shuttle',
+        returns_alone: false,
+      });
+
+    if (acceptanceError) {
+      Alert.alert('Zusage nicht moeglich', acceptanceError.message);
+      return;
+    }
+
+    const { error: updateError } = await supabase
+      .from('jobs')
+      .update({
+        status: 'accepted',
+      })
+      .eq('id', job.id);
+
+    if (updateError) {
+      Alert.alert('Auftrag konnte nicht aktualisiert werden', updateError.message);
+      return;
+    }
+
+    Alert.alert('Zugesagt', 'Du bist als Shuttle-Fahrer eingetragen.');
+    await loadOpenJobs();
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.container}>
+      <View style={{ backgroundColor: '#DC2626', padding: 20, borderRadius: 16, marginBottom: 20 }}>
+        <Text style={{ color: '#FFFFFF', fontSize: 24, fontWeight: '900', textAlign: 'center' }}>
+          TEST MITARBEITER SCREEN AKTUELL
+        </Text>
+      </View>
+
+      <Text style={styles.title}>Mitarbeiter-Bereich</Text>
+      <Text style={styles.subtitle}>Hallo {profile.full_name ?? 'Mitarbeiter'}.</Text>
+
+      <View style={styles.infoBox}>
+        <Text style={styles.infoTitle}>Offene Auftraege</Text>
+        <Text style={styles.infoText}>
+          Hier siehst du offene Auftraege deiner Filiale und kannst direkt zusagen.
+        </Text>
+      </View>
+
+      <Pressable
+        style={styles.neutralButton}
+        onPress={() => {
+          Alert.alert('Test', 'Button wurde gedrueckt.');
+          loadOpenJobs();
+        }}
+      >
+        <Text style={styles.neutralButtonText}>Liste aktualisieren</Text>
+      </Pressable>
+
+      <View style={styles.infoBox}>
+        <Text style={styles.infoTitle}>Diagnose</Text>
+        <Text style={styles.infoText}>{debugInfo}</Text>
+      </View>
+
+      {jobs.length === 0 ? (
+        <View style={styles.card}>
+          <Text style={styles.selectText}>Aktuell sind keine offenen Auftraege vorhanden.</Text>
+        </View>
+      ) : (
+        jobs.map((job) => (
+          <View key={job.id} style={styles.card}>
+            <Text style={styles.cardTitle}>{job.title}</Text>
+            <Text style={styles.branchMeta}>{jobTypeLabel(job)}</Text>
+            <Text style={styles.branchMeta}>{jobTimeLabel(job)}</Text>
+
+            {job.job_type === 'vehicle_transfer' && (
+              <Text style={styles.branchMeta}>
+                {job.start_location || 'Start offen'} → {job.destination_location || 'Ziel offen'}
+              </Text>
+            )}
+
+            {job.description ? (
+              <Text style={styles.branchMeta}>{job.description}</Text>
+            ) : null}
+
+            {job.job_type === 'vehicle_transfer' && job.shuttle_required && job.accepted_by && job.accepted_by !== profile.id ? (
+              <Pressable style={styles.primaryButton} onPress={() => acceptAsShuttle(job)}>
+                <Text style={styles.primaryButtonText}>Als Shuttle-Fahrer zusagen</Text>
+              </Pressable>
+            ) : job.job_type === 'vehicle_transfer' ? (
+              <View>
+                <Pressable style={styles.primaryButton} onPress={() => acceptTransferAlone(job)}>
+                  <Text style={styles.primaryButtonText}>Ich komme alleine zurueck</Text>
+                </Pressable>
+
+                <Pressable style={styles.secondaryButton} onPress={() => acceptTransferNeedsShuttle(job)}>
+                  <Text style={styles.secondaryButtonText}>Ich brauche Shuttle-Fahrer</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable style={styles.primaryButton} onPress={() => acceptNormalJob(job)}>
+                <Text style={styles.primaryButtonText}>Auftrag zusagen</Text>
+              </Pressable>
+            )}
+          </View>
+        ))
+      )}
 
       <Pressable style={styles.secondaryButton} onPress={onLogout}>
         <Text style={styles.secondaryButtonText}>Ausloggen</Text>
