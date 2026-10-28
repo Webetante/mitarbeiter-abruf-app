@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
     const messages = tokens.map((token) => ({
       to: token,
       sound: 'default',
-      title: body.title ?? 'Mitarbeiter Abruf',
+      title: body.title ?? 'Call a Hero',
       body:
         body.body ??
         (body.mode === 'cancelled_job'
