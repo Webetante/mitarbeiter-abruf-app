@@ -89,7 +89,7 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Mitarbeiter Abruf</Text>
+      <Text style={styles.title}>Call a Hero</Text>
       <Text style={styles.subtitle}>
         Kurzfristige Auftraege schnell an verfuegbare Mitarbeiter senden.
       </Text>
